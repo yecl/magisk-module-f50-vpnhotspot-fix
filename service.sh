@@ -3,19 +3,23 @@
 PREF=9000
 TABLE=tun0
 LOG=/data/local/tmp/vpn-tun0-rule-fix.log
+IP=/system/bin/ip
+LAST_STATE=
+
+[ -x "$IP" ] || IP=ip
 
 log_msg() {
   echo "$(date '+%F %T') $*" >> "$LOG"
 }
 
 rule_exists() {
-  ip rule | grep -q "${PREF}:.*lookup ${TABLE}"
+  "$IP" rule | grep -q "${PREF}:.*lookup ${TABLE}"
 }
 
 add_rule() {
   if ! rule_exists; then
-    if ip rule add pref "$PREF" lookup "$TABLE"; then
-      ip route flush cache
+    if "$IP" rule add pref "$PREF" lookup "$TABLE"; then
+      "$IP" route flush cache
       log_msg "added rule: pref $PREF lookup $TABLE"
     else
       log_msg "failed to add rule: pref $PREF lookup $TABLE"
@@ -25,8 +29,8 @@ add_rule() {
 
 delete_rule() {
   while rule_exists; do
-    if ip rule del pref "$PREF" lookup "$TABLE"; then
-      ip route flush cache
+    if "$IP" rule del pref "$PREF" lookup "$TABLE"; then
+      "$IP" route flush cache
       log_msg "removed rule: pref $PREF lookup $TABLE"
     else
       log_msg "failed to remove rule: pref $PREF lookup $TABLE"
@@ -40,7 +44,14 @@ system_ready() {
 }
 
 tun0_ready() {
-  ip link show "$TABLE" >/dev/null 2>&1 && ip route show table "$TABLE" | grep -q .
+  [ -d "/sys/class/net/$TABLE" ] && "$IP" route show table "$TABLE" | grep -q .
+}
+
+set_state() {
+  if [ "$LAST_STATE" != "$1" ]; then
+    LAST_STATE="$1"
+    log_msg "$1"
+  fi
 }
 
 while ! system_ready; do
@@ -48,14 +59,16 @@ while ! system_ready; do
 done
 
 log_msg "service started"
+log_msg "ip command: $IP"
 
 while true; do
   if tun0_ready; then
+    set_state "$TABLE ready"
     add_rule
   else
+    set_state "waiting for $TABLE routes"
     delete_rule
   fi
 
   sleep 5
 done
-
